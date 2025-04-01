@@ -109,7 +109,50 @@ Ora dobbiamo scrivere i file YAML per orchestrare più microservizi.
       $orderServiceDeployment | Out-File -FilePath "order-service-deployment.yaml" -Encoding utf8
 
     Write-Host "✅ File YAML per i microservizi creati!"
-### Ora puoi deployare tutto con:
+
+    per ogni microservizio, come user-service e order-service, dovremmo definire anche un Service in Kubernetes con un LoadBalancer se vogliamo esporli in modo appropriato e permettere loro di comunicare tra di loro e con il gateway.
+
+### 1️⃣ Aggiungere i Service YAML per user-service e order-service
+Ora, oltre ai Deployment, dobbiamo creare un file YAML per il Service di ogni microservizio, e possiamo settarlo con LoadBalancer se vogliamo esporlo all'esterno del cluster (o usare ClusterIP se i servizi devono solo comunicare tra loro internamente).
+
+Script PowerShell per Creare i Service YAML:
+
+        # 1️⃣ Service per user-service
+        $userService = @"
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: user-service
+        spec:
+          selector:
+            app: user-service
+          ports:
+            - protocol: TCP
+              port: 8081
+              targetPort: 8081
+          type: LoadBalancer
+        "@
+        $userService | Out-File -FilePath "user-service-service.yaml" -Encoding utf8
+        
+        # 2️⃣ Service per order-service
+        $orderService = @"
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: order-service
+        spec:
+          selector:
+            app: order-service
+          ports:
+            - protocol: TCP
+              port: 8082
+              targetPort: 8082
+          type: LoadBalancer
+        "@
+        $orderService | Out-File -FilePath "order-service-service.yaml" -Encoding utf8
+        
+        Write-Host "✅ File YAML per i Service di user-service e order-service creati!"
+### deployare tutto con:
     kubectl apply -f backend-service-1-deployment.yaml
     kubectl apply -f user-service-deployment.yaml
     kubectl apply -f order-service-deployment.yaml
@@ -125,3 +168,149 @@ Ora dobbiamo scrivere i file YAML per orchestrare più microservizi.
         <groupId>org.springframework.cloud</groupId>
         <artifactId>spring-cloud-starter-gateway</artifactId>
     </dependency>
+📌 1️⃣ Creiamo il file application.yml per il Gateway
+Esegui questo script PowerShell per creare e configurare il file application.yml per il microservizio gateway-service:
+
+### Crea la directory per il file di configurazione
+    New-Item -ItemType Directory -Path "gateway-service/src/main/resources" -Force
+    
+    # Contenuto del file application.yml
+    $gatewayConfig = @"
+    spring:
+      cloud:
+        gateway:
+          routes:
+            - id: user-service
+              uri: http://user-service:8081
+              predicates:
+                - Path=/users/**
+            - id: order-service
+              uri: http://order-service:8082
+              predicates:
+                - Path=/orders/**
+    "@
+    
+    # Scrive il file application.yml
+    $gatewayConfig | Out-File -FilePath "gateway-service/src/main/resources/application.yml" -Encoding utf8
+    
+    Write-Host "✅ File application.yml creato per il gateway!"
+📌 2️⃣ Creiamo i file YAML per il Deployment e il Service del Gateway
+### Ora esegui questo PowerShell per creare il Deployment di gateway-service in Kubernetes:
+
+
+            # Deployment per gateway-service
+            $gatewayDeployment = @"
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: gateway-service
+            spec:
+              replicas: 2
+              selector:
+                matchLabels:
+                  app: gateway-service
+              template:
+                metadata:
+                  labels:
+                    app: gateway-service
+                spec:
+                  containers:
+                    - name: gateway-service
+                      image: gateway-service:latest
+                      ports:
+                        - containerPort: 8080
+            "@
+            $gatewayDeployment | Out-File -FilePath "gateway-service-deployment.yaml" -Encoding utf8
+
+        # Service per gateway-service
+        $gatewayService = @"
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: gateway-service
+        spec:
+          selector:
+            app: gateway-service
+          ports:
+            - protocol: TCP
+              port: 8080
+              targetPort: 8080
+          type: LoadBalancer
+        "@
+        $gatewayService | Out-File -FilePath "gateway-service-service.yaml" -Encoding utf8
+        
+        Write-Host "✅ File YAML per il Gateway creati!"
+### Ora puoi deployare il gateway con:
+
+
+        kubectl apply -f gateway-service-deployment.yaml
+        kubectl apply -f gateway-service-service.yaml
+📌 3️⃣ Installiamo Istio e creiamo i VirtualService
+Ora abilitiamo Istio e creiamo la configurazione per orchestrare i microservizi.
+
+Esegui questi comandi per installare Istio:
+
+        istioctl install --set profile=demo
+        kubectl label namespace default istio-injection=enabled
+### Ora esegui questo script PowerShell per creare i VirtualService per ogni microservizio in Istio:
+
+        # VirtualService per user-service
+        $userVirtualService = @"
+        apiVersion: networking.istio.io/v1alpha3
+        kind: VirtualService
+        metadata:
+          name: user-service
+        spec:
+          hosts:
+            - user-service
+          http:
+            - route:
+                - destination:
+                    host: user-service
+                    port:
+                      number: 8081
+        "@
+        $userVirtualService | Out-File -FilePath "user-service-virtualservice.yaml" -Encoding utf8
+
+        # VirtualService per order-service
+        $orderVirtualService = @"
+        apiVersion: networking.istio.io/v1alpha3
+        kind: VirtualService
+        metadata:
+          name: order-service
+        spec:
+          hosts:
+            - order-service
+          http:
+            - route:
+                - destination:
+                    host: order-service
+                    port:
+                      number: 8082
+        "@
+        $orderVirtualService | Out-File -FilePath "order-service-virtualservice.yaml" -Encoding utf8
+
+### VirtualService per backend-service-1
+        $backendVirtualService = @"
+        apiVersion: networking.istio.io/v1alpha3
+        kind: VirtualService
+        metadata:
+          name: backend-service-1
+        spec:
+          hosts:
+            - backend-service-1
+          http:
+            - route:
+                - destination:
+                    host: backend-service-1
+                    port:
+                      number: 8080
+        "@
+        $backendVirtualService | Out-File -FilePath "backend-service-1-virtualservice.yaml" -Encoding utf8
+        
+        Write-Host "✅ VirtualService YAML creati per Istio!"
+### Ora puoi deployare i VirtualService con:
+
+        kubectl apply -f user-service-virtualservice.yaml
+        kubectl apply -f order-service-virtualservice.yaml
+        kubectl apply -f backend-service-1-virtualservice.yaml
